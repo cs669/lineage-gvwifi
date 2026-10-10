@@ -129,8 +129,9 @@ allowlist stays so a data-installed copy keeps working. v1.2 has the new intro t
 - Charging only from the 19 V DC barrel. Micro-USB is data only (hardware).
 - Aurora Store's home page crashes (Aurora bug, duplicate list key). Open app pages with
   `am start -a VIEW -d market://details?id=<pkg> -p com.aurora.store`.
-- The Companion only works on this ROM (owner-key allowlist). Switch back to official microG
-  once 0.3.17 is released.
+- microG: official microG 0.3.17 (2026-09-29) includes Play Age Signals, so the maintainer-built
+  Companion is no longer needed; use official microG. `frameworks/base` 0002 stays for anyone
+  still running the maintainer-built Companion.
 - Recovery's kernel stays SELinux-permissive (build 2b / 09-23 recoveries). Enforcing
   recovery is untested.
 - This build needs a unit **without** a HIDDEN partition.

@@ -25,7 +25,7 @@ Build 20261005 on the SM-T670 (1920x1080, landscape).
 ## Related repos
 - [`lineage-recovery-gvwifi`](https://github.com/gvwifi-los23/lineage-recovery-gvwifi): the LineageOS recovery built from this tree
 - [`twrp-gvwifi`](https://github.com/gvwifi-los23/twrp-gvwifi): TWRP 3.7.1 (twrp-14.1) with FBE decryption for this ROM
-- [`microg-companion-gvwifi`](https://github.com/gvwifi-los23/microg-companion-gvwifi): the microG Companion build this ROM allowlists
+- [`microg-companion-gvwifi`](https://github.com/gvwifi-los23/microg-companion-gvwifi): superseded; use official microG 0.3.17 or newer, which includes Play Age Signals
 
 ## Build
 1. Windows: `scripts\0-setup-wsl.ps1` (WSL Ubuntu 24.04), then in WSL `scripts/1-host-setup.sh`

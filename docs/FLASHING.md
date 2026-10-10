@@ -9,7 +9,7 @@ build. **Doing this from stock erases the tablet.**
 | `2-recovery/` | LineageOS recovery for Odin, built with this ROM. Its kernel keeps SELinux permissive in recovery. Tested: sideload, then reboot to system |
 | `2-recovery/fallback-20260923-1408/` | An older recovery, used for this ROM's development installs. Use it only if the main one misbehaves (its kernel lacks the USB freeze fix, so sideload can stall) |
 | `3-rom/` | ROM zip + SHA-256 |
-| `4-apps/` | Optional: microG Services 0.3.16 (official), microG Companion 0.3.16-28 (built from microG source with Play *Age Signals*, signed by this ROM's maintainer), Aurora Store and NewPipe 0.29.1 (F-Droid builds). Install whichever you want with `adb install --no-streaming <file>.apk` |
+| `4-apps/` | Optional: microG Services and microG Companion 0.3.17 (official; include Play *Age Signals*), Aurora Store and NewPipe 0.29.1 (F-Droid builds). Install whichever you want with `adb install --no-streaming <file>.apk` |
 | `5-scripts/` | `device-check.ps1` (backup EFS + verify partition layout), `post-install.ps1` (optional: microG permissions + disable unused system apps; the built-in gvwifi Tweaks app does the same without a PC), `disabled-apps.txt` |
 | `optional-twrp-backup/` | TWRP 3.2.1-0 for Odin, only needed for the backup/check step |
 | `SHA256SUMS.txt` | Checksums for every file here |
@@ -70,12 +70,11 @@ ever fails to finish, the kernel restarts into recovery after 15 minutes, with t
 - PC alternative: `5-scripts/post-install.ps1` does the same over adb.
 
 ## Notes
-- **microG Companion:** the included build (0.3.16-28, microG source at commit `fcb2c20`) adds
-  Google Play's *Age Signals* service, which some apps require and which official microG
-  only gets in 0.3.17. It's signed by the ROM maintainer, and this ROM allows that one key to
-  act as the Play Store (as it does for official microG). Official microG Companion also works.
-  To switch between the two, uninstall `com.android.vending` first, because their
-  signatures differ.
+- **microG:** use official microG 0.3.17 or newer. It includes Google Play's *Age Signals*
+  service, which some apps require. If you installed this ROM's earlier maintainer-built
+  Companion, uninstall `com.android.vending` first (the signatures differ), then install the
+  official one. Apps installed before the new Companion may show a Google Play license error;
+  reinstalling them fixes it.
 - Aurora's home page may crash (Aurora bug). Use search, or open an app page from the PC:
   `adb shell am start -a android.intent.action.VIEW -d market://details?id=<package> -p com.aurora.store`
 - Updating later: sideload the new zip from recovery, no wipe needed (but see below for
