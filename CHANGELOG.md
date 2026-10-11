@@ -3,8 +3,8 @@
 Base: LineageOS 23.2 (Android 16, `lineage_gvwifi-bp4a-userdebug`) from the github.com/gvwifi
 trees, kernel 3.10.108 (Exynos 7580), for the Samsung Galaxy View **SM-T670**.
 Every source change is a patch in `patches/<project>/`, applied by `scripts/apply-patches.sh`
-at build time. Nothing is committed upstream. Current build: 2026-10-08 (`lineage-23.2-20261008-UNOFFICIAL-gvwifi.zip`), ROM zip
-SHA-256 `4390fc65…27c3`, recovery tar `eef58bf9…476c`.
+at build time. Nothing is committed upstream. Current build: 2026-10-11 (`lineage-23.2-20261011-UNOFFICIAL-gvwifi.zip`), ROM zip
+SHA-256 `3c349672…5c35`, recovery tar `eef58bf9…476c`.
 
 ---
 
@@ -44,7 +44,7 @@ SHA-256 `4390fc65…27c3`, recovery tar `eef58bf9…476c`.
 | 0009 signature allowlist for gvwifi Tweaks | `/system/etc/permissions/signature-permissions-gvwifi-tweaks.xml` lets `org.gvwifi.tweaks` hold WRITE_SECURE_SETTINGS, WRITE_SETTINGS, CHANGE_COMPONENT_ENABLED_STATE, GRANT_RUNTIME_PERMISSIONS, DEVICE_POWER | Android 15+ denies platform signature permissions to a platform-signed app that isn't in the system image unless it is allowlisted ("not in signature permission allowlist") |
 | 0011 ship HeliBoard (Galaxy View keyboard) | `HeliBoard/Android.bp` (`android_app_import`, signed by the build) and `PRODUCT_PACKAGES += HeliBoard`; `3-build.sh` copies `tools/HeliBoard/out/HeliBoard.apk` there | The default keyboard: HeliBoard v4.1 with the stock SM-T670 Samsung Keyboard layout and colors and word suggestions (see `README`/`BUILD-KIT`, "Keyboard"). LatinIME stays installed as an alternative |
 
-### `device/samsung/universal7580-common` (6 patches)
+### `device/samsung/universal7580-common` (7 patches)
 | Patch | Change | Why |
 |---|---|---|
 | 0001 `/metadata` on CACHE, userdata p22 | fstab: `/metadata` on CACHE (p21), no `/cache`; sepolicy userdata label on p22 | **This SM-T670 has no HIDDEN partition.** A missing first-stage `/metadata` bootlooped |
@@ -53,6 +53,7 @@ SHA-256 `4390fc65…27c3`, recovery tar `eef58bf9…476c`.
 | 0004 rules for real enforcing | `set_prop(vendor_init, vendor_gvwifi_hwc_prop)`; fuel gauge `1-000b/power_supply` → `sysfs_batteryinfo`; netd↔gpsd socket tagging; ueventd `sys_nice` | Without the set_prop, **present fences were silently off** under Enforcing |
 | 0006 GPS symlinks from a system init script | New `configs/init/gps-links.rc` (installed to `/system/etc/init`) creates `/data/system/gps` and `/data/gps` → `/data/vendor/gps` | Samsung gpsd hardcodes both paths. The vendor rc's `symlink` commands run as `vendor_init`, which may not write core `/data`, so on a fresh install they silently failed and GPS never started (gpsd retried every 5 s). Found on the first clean install of the public build |
 | 0005 rules seen under real enforcement | vendor_init `search` on wifi/app/radio/nfc data dirs; vendor_toolbox `sys_admin` (init.baseband.rc strips `security.sehash` on /efs); dontaudit gpsd/tee probes | Denials enforced once kernel 0008 landed |
+| 0007 Widevine: legacy CDM may use `/data/mediadrm` | `hal_drm_default` gets the `data_between_core_and_vendor_violators` attribute and create/read/write on `media_data_file` dirs and files | The 2016 Widevine CDM (`libwvdrmengine.so`, including its obfuscated L3 code) hardcodes `/data/mediadrm`, a core data path that Treble forbids to vendor HALs. Every Widevine session failed, so apps saw only ClearKey and protected video wouldn't play. Verified: Widevine L3 (system ID 4445) provisions online, opens sessions and generates license requests under Enforcing |
 
 ## Android framework and modules
 
@@ -135,6 +136,9 @@ allowlist stays so a data-installed copy keeps working. v1.2 has the new intro t
 - Recovery's kernel stays SELinux-permissive (build 2b / 09-23 recoveries). Enforcing
   recovery is untested.
 - This build needs a unit **without** a HIDDEN partition.
+- Widevine is L3 only (software; SD-quality streams in most apps). L1 would need the stock
+  MobiCore TEE stack and `liboemcrypto.so`. DRM Info lists only ClearKey because the 2016
+  Widevine HAL (drm@1.0) can't report its schemes; apps that ask for Widevine directly get it.
 - Recoveries older than 09-26 18:58 drop USB after the first sideload (fixed by kernel 0011).
   Flash the current `2-recovery` tar once with Odin; the ROM zip doesn't update recovery.
 - The Windows adb server sometimes loses a device that is still configured on the tablet's side

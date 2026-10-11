@@ -1,0 +1,13 @@
+--- a/sepolicy/hal_drm_default.te
++++ b/sepolicy/hal_drm_default.te
+@@ -8,3 +8,10 @@
+ 
+ allow hal_drm_default mediadrm_vendor_data_file:file create_file_perms;
+ allow hal_drm_default mediadrm_vendor_data_file:dir create_dir_perms;
++
++# The 2016 Widevine CDM (libwvdrmengine.so, also its obfuscated L3 code) hardcodes
++# /data/mediadrm, a core data path. Without access every Widevine session failed and
++# apps saw only ClearKey. Legacy-blob exemption from the Treble data split.
++typeattribute hal_drm_default data_between_core_and_vendor_violators;
++allow hal_drm_default media_data_file:dir create_dir_perms;
++allow hal_drm_default media_data_file:file create_file_perms;
