@@ -71,8 +71,8 @@ ever fails to finish, the kernel restarts into recovery after 15 minutes, with t
 
 ## Notes
 - **microG:** use official microG 0.3.17 or newer. It includes Google Play's *Age Signals*
-  service, which some apps require. If you installed this ROM's earlier maintainer-built
-  Companion, uninstall `com.android.vending` first (the signatures differ), then install the
+  service, which some apps require. Builds after 20261011 no longer accept this ROM's earlier
+  maintainer-built Companion. If you installed it, uninstall `com.android.vending` first (the signatures differ), then install the
   official one. Apps installed before the new Companion may show a Google Play license error;
   reinstalling them fixes it.
 - Aurora's home page may crash (Aurora bug). Use search, or open an app page from the PC:

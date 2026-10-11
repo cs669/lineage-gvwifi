@@ -62,7 +62,7 @@ SHA-256 `3c349672…5c35`, recovery tar `eef58bf9…476c`.
 | `hardware/interfaces` 0001 | hwc2on1adapter omits `PresentFenceIsNotReliable` when `ro.vendor.hwc.present_fence_reliable` is set | The adapter forced HW vsync on permanently. A/B: fences on uses about 185% vs 198% of a core for SF+composer |
 | `hardware/interfaces` 0002 | USB HAL 1.0: without `/sys/class/dual_role_usb`, report one fixed port (`otg_default`, UFP, data role device, power role sink, no role switching) | The 3.10 kernel has no dual_role_usb or typec class, so the HAL reported no ports, the framework's data role stayed NONE and Settings greyed out every USB option (file transfer, PTP, MIDI, no data). Micro-USB on this tablet is device-only. Verified: the options work |
 | `frameworks/base` 0001 (public) | SystemUI rotation tile: on devices **without an accelerometer**, a tap switches between landscape (0°) and portrait (90°) via `RotationPolicy.setRotationLockAtAngle`, and the label reads "Landscape"/"Portrait". Devices with an accelerometer are unchanged | The Galaxy View has no accelerometer (DTS: only a bh1733 light and an sx9310 grip sensor), so auto-rotate never worked. Tested on device |
-| `frameworks/base` 0002 (public since 2026-09-26; was private 0001) | `ComputerEngine.isMicrogSigned()` also accepts the maintainer's Companion certificate (SHA-256 `fa7fcd26…2871`), **only for `com.android.vending`** | Lets the maintainer-built microG Companion (0.3.16-28, with Play Age Signals; shipped in `flash-kit/4-apps`) spoof the Play Store signature, so apps that query Age Signals work (without it they fail with error GA-5). It was kept private at first; made public once the ROM itself was signed with the maintainer's release keys, since users already trust that maintainer with far more (system updates). That retired the separate private build |
+| ~~`frameworks/base` 0002~~ (removed after build 20261011) | Accepted the maintainer-built microG Companion's certificate for `com.android.vending` signature spoofing | Official microG 0.3.17 includes Play Age Signals, so the maintainer-built Companion and this allowlist are no longer needed. Builds after 20261011 accept only official microG signatures |
 | `frameworks/base` 0003 | SettingsProvider loads `def_animator_duration_scale` (new overlayable default, 100%) into Global `animator_duration_scale` | AOSP only has overlayable defaults for the window and transition scales; needed for gvwifi 0008 |
 | `lineage-sdk` 0001 | New overlayable `def_status_bar_show_battery_percent` (default 0), loaded in LineageSettingsProvider | Lets gvwifi 0008 turn on battery % by default |
 | `frameworks/base` 0004 | `InputMethodInfoUtils.isSystemImeThatHasSubtypeOf()`: a system IME marked `isDefault` whose XML subtypes name no language counts as matching the system locale | First boot picks a default keyboard only among system IMEs that are `isDefault` **and** declare a subtype for the system locale. HeliBoard declares its languages at runtime (`method_dummy.xml` has one placeholder subtype without a locale), so it never qualified and LatinIME was chosen. Only affects default system IMEs whose subtypes are all locale-less |
@@ -130,9 +130,9 @@ allowlist stays so a data-installed copy keeps working. v1.2 has the new intro t
 - Charging only from the 19 V DC barrel. Micro-USB is data only (hardware).
 - Aurora Store's home page crashes (Aurora bug, duplicate list key). Open app pages with
   `am start -a VIEW -d market://details?id=<pkg> -p com.aurora.store`.
-- microG: official microG 0.3.17 (2026-09-29) includes Play Age Signals, so the maintainer-built
-  Companion is no longer needed; use official microG. `frameworks/base` 0002 stays for anyone
-  still running the maintainer-built Companion.
+- microG: use official microG 0.3.17 or newer (2026-09-29; includes Play Age Signals). Builds
+  after 20261011 no longer accept the earlier maintainer-built Companion (`frameworks/base` 0002
+  removed); replace it with the official one.
 - Recovery's kernel stays SELinux-permissive (build 2b / 09-23 recoveries). Enforcing
   recovery is untested.
 - This build needs a unit **without** a HIDDEN partition.
