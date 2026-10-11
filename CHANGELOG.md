@@ -8,7 +8,7 @@ SHA-256 `3c349672…5c35`, recovery tar `eef58bf9…476c`.
 
 ---
 
-## Kernel: `kernel/samsung/universal7580` (14 patches)
+## Kernel: `kernel/samsung/universal7580` (15 patches)
 
 | Patch | Change | Why |
 |---|---|---|
@@ -26,6 +26,7 @@ SHA-256 `3c349672…5c35`, recovery tar `eef58bf9…476c`.
 | 0012 fscrypt: implement `FS_IOC_GET_ENCRYPTION_POLICY_EX` | `fscrypt_ioctl_get_policy_ex()` in `fs/crypto/policy.c` plus the ext4 ioctl case | The fscrypt v2 backport declared it but never implemented it, so the ioctl returned `-ENOTTY` and nothing could read back a v2 policy: TWRP Data backups lost every directory's encryption policy |
 | 0013 USB FunctionFS: drop the kiocb reference in aio cancel | `ffs_aio_cancel()` calls `aio_put_req()` | On 3.10, `kiocb_cancel()` takes an extra reference before calling the cancel callback and expects the callback to drop it (as gadgetfs' `ep_aio_cancel()` does). The backported FunctionFS callback follows the 3.15+ convention and never did, so each read adbd had pending when it stopped leaked its kiocb, and with it the endpoint file. FunctionFS never reset and every new adbd failed with "failed to write USB descriptors: No such process": `adb root`, turning USB debugging off, or any USB mode switch left USB adb offline until a reboot. Verified: `adb root` over USB reconnects |
 | 0014 fs: clear and free per-inode fscrypt / fs-verity info | `inode_init_always()` sets `i_crypt_info` and `i_verity_info` to NULL; `ext4_clear_inode()` calls `fscrypt_put_encryption_info()` and `fsverity_cleanup_inode()`; `ext4_alloc_inode()` clears the legacy ext4 key | **Data integrity.** The fscrypt/fs-verity backport added both fields but never cleared or freed them, so an inode recycled from the slab kept the previous file's info. A stale `i_verity_info` (left by an evicted fs-verity APK) made reads of ordinary files fail verification with a silent EIO: after a few framework restarts `packages.xml`, `roles.xml` and `package-restrictions.xml` became unreadable and system_server crash-looped ("Failed to read roles.xml ... EIO"). A stale `i_crypt_info` means data written with another file's key, which reads back as garbage after a reboot (the likely cause of the 2026-09-24 `packages.xml` loss). Verified: 0 read errors over the whole of `/data/system`, `/data/misc(_de)`, `/data/app` after 8 framework restarts (several per scan before) |
+| 0015 ION: keep multi-heap allocations out of secure heaps (after build 20261011) | `__ion_alloc()` skips a secure heap (`secure` in the device tree, e.g. `video`) for an unprotected request that names more than one heap; new helper `ion_heap_is_secure()` | Android 16's Codec2 ION allocator asks for every heap (`~0`), so a software decoder's buffer (a 32 KB Vorbis block at boot, kept by a leaked reference) landed in the secure `video` heap. While any unprotected buffer sits there the heap can't switch to protected mode, so every protected allocation failed with EPERM and secure video decoding could not start. Requests that name only the secure heap (Exynos OMX) are unchanged. Verified: the heap stays empty after boot and enters protected mode on demand; Widevine L3 playback (720p, hardware decoder) still works |
 
 ## Device trees
 
@@ -136,9 +137,11 @@ allowlist stays so a data-installed copy keeps working. v1.2 has the new intro t
 - Recovery's kernel stays SELinux-permissive (build 2b / 09-23 recoveries). Enforcing
   recovery is untested.
 - This build needs a unit **without** a HIDDEN partition.
-- Widevine is L3 only (software; SD-quality streams in most apps). L1 would need the stock
-  MobiCore TEE stack and `liboemcrypto.so`. DRM Info lists only ClearKey because the 2016
-  Widevine HAL (drm@1.0) can't report its schemes; apps that ask for Widevine directly get it.
+- Widevine is L3 only (software; SD-quality streams in most apps). L1 isn't supported: it needs
+  Samsung's matching TEE (MobiCore t-base 302A) software, and the stock Android 5.1 OEMCrypto
+  library implements an older API than the 2016 Widevine engine expects. DRM Info lists only
+  ClearKey because the 2016 Widevine HAL (drm@1.0) can't report its schemes; apps that ask for
+  Widevine directly get it.
 - Recoveries older than 09-26 18:58 drop USB after the first sideload (fixed by kernel 0011).
   Flash the current `2-recovery` tar once with Odin; the ROM zip doesn't update recovery.
 - The Windows adb server sometimes loses a device that is still configured on the tablet's side

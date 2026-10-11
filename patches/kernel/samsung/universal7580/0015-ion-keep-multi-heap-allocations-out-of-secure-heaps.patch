@@ -1,0 +1,59 @@
+diff --git a/drivers/staging/android/ion/exynos/exynos_ion_v2.c b/drivers/staging/android/ion/exynos/exynos_ion_v2.c
+index 3703f0ef..3695a9c6 100644
+--- a/drivers/staging/android/ion/exynos/exynos_ion_v2.c
++++ b/drivers/staging/android/ion/exynos/exynos_ion_v2.c
+@@ -99,6 +99,13 @@ static int __ion_secure_protect(struct exynos_ion_platform_heap *pdata)
+ 	return 0;
+ }
+ 
++bool ion_heap_is_secure(struct ion_heap *heap)
++{
++	int id = __find_platform_heap_id(heap->id);
++
++	return id >= 0 && plat_heaps[id].secure;
++}
++
+ int ion_secure_protect(struct ion_heap *heap)
+ {
+ 	struct exynos_ion_platform_heap *pdata;
+diff --git a/drivers/staging/android/ion/ion.c b/drivers/staging/android/ion/ion.c
+index 8c317ba2..2c7243e1 100644
+--- a/drivers/staging/android/ion/ion.c
++++ b/drivers/staging/android/ion/ion.c
+@@ -751,6 +751,16 @@ static struct ion_handle *__ion_alloc(struct ion_client *client, size_t len,
+ 		/* if the caller didn't specify this heap id */
+ 		if (!((1 << heap->id) & heap_id_mask))
+ 			continue;
++		/*
++		 * A request that names several heaps (Codec2's ION allocator
++		 * asks for ~0) must not land in a secure heap: one unprotected
++		 * buffer left there makes every later protected allocation
++		 * fail, so secure (DRM) video decoding can't start.
++		 */
++		if (!(flags & ION_FLAG_PROTECTED) &&
++		    (heap_id_mask & ~(1 << heap->id)) &&
++		    ion_heap_is_secure(heap))
++			continue;
+ 		buffer = ion_buffer_create(heap, dev, len, align, flags);
+ 		if (!IS_ERR(buffer))
+ 			break;
+diff --git a/include/linux/exynos_ion.h b/include/linux/exynos_ion.h
+index 29e3bf3b..21862708 100644
+--- a/include/linux/exynos_ion.h
++++ b/include/linux/exynos_ion.h
+@@ -179,6 +179,7 @@ int ion_exynos_contig_heap_isolate(int region_id);
+ void ion_exynos_contig_heap_deisolate(int region_id);
+ int ion_secure_protect(struct ion_heap *heap);
+ int ion_secure_unprotect(struct ion_heap *heap);
++bool ion_heap_is_secure(struct ion_heap *heap);
+ bool ion_is_heap_available(struct ion_heap *heap, unsigned long flags, void *data);
+ #ifdef CONFIG_DMA_CMA
+ int ion_exynos_isolate_async(int region_id);
+@@ -197,6 +198,7 @@ int ion_exynos_isolate_async(int region_id);
+ #define exynos_ion_sync_sg_for_cpu(dev, size, sgt, dir) do { } while (0)
+ #define ion_secure_protect(heap) do { } while (0)
+ #define ion_secure_unprotect(heap) do { } while (0)
++#define ion_heap_is_secure(heap) (false)
+ #define ion_is_heap_available(heap, flags, data) (1)
+ #define ion_exynos_isolate_async(id) (0)
+ 
