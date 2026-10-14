@@ -1,0 +1,79 @@
+diff --git a/drm/libmediadrm/DrmHalHidl.cpp b/drm/libmediadrm/DrmHalHidl.cpp
+index 33ea5ea..3df3729 100644
+--- a/drm/libmediadrm/DrmHalHidl.cpp
++++ b/drm/libmediadrm/DrmHalHidl.cpp
+@@ -40,6 +40,7 @@
+ #include <mediadrm/IDrmMetricsConsumer.h>
+ #include <utils/Log.h>
+ 
++#include <algorithm>
+ #include <iomanip>
+ #include <vector>
+ 
+@@ -529,7 +530,21 @@ DrmStatus DrmHalHidl::matchMimeTypeAndSecurityLevel(const sp<IDrmFactory>& facto
+ 
+     sp<drm::V1_2::IDrmFactory> factoryV1_2 = drm::V1_2::IDrmFactory::castFrom(factory);
+     if (factoryV1_2 == NULL) {
+-        return DrmStatus(ERROR_UNSUPPORTED);
++        // A drm@1.0/1.1 factory can't be asked about security levels. Legacy
++        // (pre-1.2) plugins are software CDMs here, so answer for the software
++        // levels from the content type and keep the hardware levels unsupported:
++        // reporting "unsupported" for every level hid Widevine L3 from apps.
++        if (level != DrmPlugin::kSecurityLevelMax &&
++            level != DrmPlugin::kSecurityLevelSwSecureCrypto &&
++            level != DrmPlugin::kSecurityLevelSwSecureDecode) {
++            return DrmStatus(OK);
++        }
++        auto hResult = factory->isContentTypeSupported(mimeType.c_str());
++        if (!hResult.isOk()) {
++            return DrmStatus(DEAD_OBJECT);
++        }
++        *isSupported = hResult;
++        return DrmStatus(OK);
+     } else {
+         auto hResult = factoryV1_2->isCryptoSchemeSupported_1_2(uuid, mimeType.c_str(),
+                                                                 toHidlSecurityLevel(level));
+@@ -1530,9 +1545,43 @@ DrmStatus DrmHalHidl::getLogMessages(Vector<drm::V1_4::LogMessage>& logs) const
+ 
+ DrmStatus DrmHalHidl::getSupportedSchemes(std::vector<uint8_t>& schemes) const {
+     Mutex::Autolock autoLock(mLock);
++    // Well-known schemes to probe on factories that can't list their own.
++    static const uint8_t kKnownSchemes[][16] = {
++            // Widevine
++            {0xed, 0xef, 0x8b, 0xa9, 0x79, 0xd6, 0x4a, 0xce,
++             0xa3, 0xc8, 0x27, 0xdc, 0xd5, 0x1d, 0x21, 0xed},
++            // ClearKey
++            {0xe2, 0x71, 0x9d, 0x58, 0xa9, 0x85, 0xb3, 0xc9,
++             0x78, 0x1a, 0xb0, 0x30, 0xaf, 0x78, 0xd3, 0x0e},
++            // W3C common PSSH
++            {0x10, 0x77, 0xef, 0xec, 0xc0, 0xb2, 0x4d, 0x02,
++             0xac, 0xe3, 0x3c, 0x1e, 0x52, 0xe2, 0xfb, 0x4b},
++            // PlayReady
++            {0x9a, 0x04, 0xf0, 0x79, 0x98, 0x40, 0x42, 0x86,
++             0xab, 0x92, 0xe6, 0x5b, 0xe0, 0x88, 0x5f, 0x95},
++    };
+     for (auto &factory : mFactories) {
+         sp<drm::V1_3::IDrmFactory> factoryV1_3 = drm::V1_3::IDrmFactory::castFrom(factory);
+         if (factoryV1_3 == nullptr) {
++            // drm@1.0-1.2 factories have no getSupportedCryptoSchemes(), so
++            // list the known schemes they report as supported (otherwise a
++            // legacy Widevine HAL never appears in MediaDrm's scheme list).
++            for (const auto &uuid : kKnownSchemes) {
++                auto supported = factory->isCryptoSchemeSupported(uuid);
++                if (!supported.isOk() || !supported) {
++                    continue;
++                }
++                bool listed = false;
++                for (size_t i = 0; i + 16 <= schemes.size(); i += 16) {
++                    if (std::equal(uuid, uuid + 16, schemes.begin() + i)) {
++                        listed = true;
++                        break;
++                    }
++                }
++                if (!listed) {
++                    schemes.insert(schemes.end(), uuid, uuid + 16);
++                }
++            }
+             continue;
+         }
+ 
