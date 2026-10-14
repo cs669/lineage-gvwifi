@@ -1,0 +1,33 @@
+--- a/drm/libmediadrm/DrmHalHidl.cpp
++++ b/drm/libmediadrm/DrmHalHidl.cpp
+@@ -1117,7 +1117,29 @@
+     DrmStatus err = UNKNOWN_ERROR;
+ 
+     if (mPluginV1_1 == NULL) {
+-        return DrmStatus(ERROR_DRM_CANNOT_HANDLE);
++        // drm@1.0 has no per-session security level. Media3 asks for it on
++        // Android 12+ and gives up on ERROR_DRM_CANNOT_HANDLE, so answer from
++        // the plugin's own "securityLevel" property (Widevine: L1/L2/L3).
++        String8 property;
++        Return<void> hResult = mPlugin->getPropertyString(
++                hidl_string("securityLevel"), [&](Status status, const hidl_string& value) {
++                    if (status == Status::OK) {
++                        property = String8(value.c_str());
++                    }
++                });
++        if (!hResult.isOk()) {
++            return DrmStatus(DEAD_OBJECT);
++        }
++        if (property == "L1") {
++            *level = DrmPlugin::kSecurityLevelHwSecureAll;
++        } else if (property == "L2") {
++            *level = DrmPlugin::kSecurityLevelHwSecureCrypto;
++        } else if (property == "L3") {
++            *level = DrmPlugin::kSecurityLevelSwSecureCrypto;
++        } else {
++            return DrmStatus(ERROR_DRM_CANNOT_HANDLE);
++        }
++        return DrmStatus(OK);
+     }
+ 
+     *level = DrmPlugin::kSecurityLevelUnknown;
