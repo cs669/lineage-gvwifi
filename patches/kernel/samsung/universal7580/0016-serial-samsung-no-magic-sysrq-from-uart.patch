@@ -1,0 +1,20 @@
+diff --git a/drivers/tty/serial/samsung.c b/drivers/tty/serial/samsung.c
+index e7cc8a42..42d72272 100644
+--- a/drivers/tty/serial/samsung.c
++++ b/drivers/tty/serial/samsung.c
+@@ -25,7 +25,14 @@
+ */
+ 
+ #if defined(CONFIG_SERIAL_SAMSUNG_CONSOLE) && defined(CONFIG_MAGIC_SYSRQ)
+-#define SUPPORT_SYSRQ
++/*
++ * gvwifi: no magic SysRq from the UARTs. On a warm reboot (TWRP -> system,
++ * system -> recovery) UART1 receives a break plus junk, which the serial core
++ * turned into SysRq commands; SysRq 'f' (OOM kill) at ~2.8 s panicked with
++ * "no killable processes" and the boot hung after the Galaxy View logo.
++ * /proc/sysrq-trigger is unaffected.
++ */
++/* #define SUPPORT_SYSRQ */
+ #endif
+ 
+ #include <linux/module.h>

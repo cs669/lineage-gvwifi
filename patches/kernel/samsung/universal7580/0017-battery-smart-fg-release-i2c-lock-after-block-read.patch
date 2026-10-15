@@ -1,0 +1,15 @@
+diff --git a/drivers/battery/smart_fuelgauge.c b/drivers/battery/smart_fuelgauge.c
+index 42952790..bc57ca6f 100644
+--- a/drivers/battery/smart_fuelgauge.c
++++ b/drivers/battery/smart_fuelgauge.c
+@@ -84,6 +84,10 @@ int smart_fg_read_block_data(struct i2c_client *i2c, u8 reg, u8 length, u8 *valu
+ 
+ 	mutex_lock(&fuelgauge->i2c_lock);
+ 	ret = i2c_smbus_read_i2c_block_data(i2c, reg, length, value);
++	/* gvwifi: release the lock. It was never released here, so the first
++	 * firmware read (POWER_SUPPLY_PROP_PRESENT) froze every later gauge
++	 * access: the battery monitor hung and Android showed stale values. */
++	mutex_unlock(&fuelgauge->i2c_lock);
+ 	if (ret < 0)
+ 		return ret;
+ 
