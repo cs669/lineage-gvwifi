@@ -1,0 +1,453 @@
+diff --git a/hardware/audio/aidl/Module.cpp b/hardware/audio/aidl/Module.cpp
+index 66cd770..65b9e56 100644
+--- a/hardware/audio/aidl/Module.cpp
++++ b/hardware/audio/aidl/Module.cpp
+@@ -36,6 +36,7 @@
+ #include <aidl/android/media/audio/common/AudioPortMixExt.h>
+ #include <aidl/android/media/audio/common/AudioProfile.h>
+ #include <aidl/android/media/audio/common/PcmType.h>
++#include <aidl/android/hardware/audio/core/BnBluetooth.h>
+ 
+ #include "Module.h"
+ #include "StreamOut.h"
+@@ -93,8 +94,17 @@ static audio_input_flags_t aidlInputFlagsToLegacy(int32_t aidlFlags) {
+     return static_cast<audio_input_flags_t>(aidlFlags);
+ }
+ 
+-static audio_devices_t aidlDeviceToLegacy(AudioDeviceType type) {
+-    switch (type) {
++static audio_devices_t aidlDeviceToLegacy(const AudioDeviceDescription& desc) {
++    if (desc.connection == AudioDeviceDescription::CONNECTION_BT_SCO) {
++        switch (desc.type) {
++            case AudioDeviceType::OUT_DEVICE: return AUDIO_DEVICE_OUT_BLUETOOTH_SCO;
++            case AudioDeviceType::OUT_HEADSET: return AUDIO_DEVICE_OUT_BLUETOOTH_SCO_HEADSET;
++            case AudioDeviceType::OUT_CARKIT: return AUDIO_DEVICE_OUT_BLUETOOTH_SCO_CARKIT;
++            case AudioDeviceType::IN_HEADSET: return AUDIO_DEVICE_IN_BLUETOOTH_SCO_HEADSET;
++            default: return AUDIO_DEVICE_NONE;
++        }
++    }
++    switch (desc.type) {
+         case AudioDeviceType::OUT_SPEAKER: return AUDIO_DEVICE_OUT_SPEAKER;
+         case AudioDeviceType::OUT_SPEAKER_EARPIECE: return AUDIO_DEVICE_OUT_EARPIECE;
+         case AudioDeviceType::OUT_HEADSET: return AUDIO_DEVICE_OUT_WIRED_HEADSET;
+@@ -108,6 +118,53 @@ static audio_devices_t aidlDeviceToLegacy(AudioDeviceType type) {
+     }
+ }
+ 
++// IBluetooth for the primary module. audioserver turns the BT stack's SCO
++// settings into setScoConfig(); the legacy HAL reads them as parameters.
++class LegacyBluetooth : public BnBluetooth {
++  public:
++    explicit LegacyBluetooth(audio_hw_device_t* device) : mDevice(device) {}
++
++    ndk::ScopedAStatus setScoConfig(const ScoConfig& in_config,
++                                    ScoConfig* _aidl_return) override {
++        if (in_config.isEnabled.has_value()) {
++            mScoConfig.isEnabled = in_config.isEnabled;
++        }
++        if (in_config.isNrecEnabled.has_value()) {
++            mScoConfig.isNrecEnabled = in_config.isNrecEnabled;
++            set(in_config.isNrecEnabled->value ? "bt_headset_nrec=on"
++                                                : "bt_headset_nrec=off");
++        }
++        if (in_config.mode != ScoConfig::Mode::UNSPECIFIED) {
++            mScoConfig.mode = in_config.mode;
++            set(in_config.mode == ScoConfig::Mode::SCO ? "bt_wbs=off" : "bt_wbs=on");
++        }
++        if (in_config.debugName.has_value()) {
++            mScoConfig.debugName = in_config.debugName;
++        }
++        *_aidl_return = mScoConfig;
++        LOG(INFO) << __func__ << ": " << mScoConfig.toString();
++        return ndk::ScopedAStatus::ok();
++    }
++
++    ndk::ScopedAStatus setHfpConfig(const HfpConfig& in_config,
++                                    HfpConfig* _aidl_return) override {
++        if (in_config.isEnabled.has_value()) mHfpConfig.isEnabled = in_config.isEnabled;
++        if (in_config.sampleRate.has_value()) mHfpConfig.sampleRate = in_config.sampleRate;
++        if (in_config.volume.has_value()) mHfpConfig.volume = in_config.volume;
++        *_aidl_return = mHfpConfig;
++        return ndk::ScopedAStatus::ok();
++    }
++
++  private:
++    void set(const char* kv) {
++        if (mDevice && mDevice->set_parameters) mDevice->set_parameters(mDevice, kv);
++    }
++
++    audio_hw_device_t* mDevice;
++    ScoConfig mScoConfig;
++    HfpConfig mHfpConfig;
++};
++
+ static const AudioPortConfig* findPortConfigById(const std::vector<AudioPortConfig>& configs,
+                                                  int32_t id) {
+     auto it = std::find_if(configs.begin(), configs.end(),
+@@ -130,7 +187,7 @@ static audio_devices_t portConfigToLegacyDevice(const std::vector<AudioPortConfi
+     if (!port) return AUDIO_DEVICE_NONE;
+     if (port->ext.getTag() != AudioPortExt::Tag::device) return AUDIO_DEVICE_NONE;
+     const auto& dev = port->ext.get<AudioPortExt::Tag::device>().device.type;
+-    return aidlDeviceToLegacy(dev.type);
++    return aidlDeviceToLegacy(dev);
+ }
+ 
+ static bool containsConfigId(const std::vector<int32_t>& ids, int32_t targetId) {
+@@ -147,6 +204,13 @@ static audio_io_handle_t resolveLegacyHandleForPortConfig(const std::vector<Audi
+     return static_cast<audio_io_handle_t>(mixHandle != 0 ? mixHandle : portConfigId);
+ }
+ 
++static int32_t mixHandleForPortConfig(const std::vector<AudioPortConfig>& configs,
++                                      int32_t portConfigId) {
++    const auto* cfg = findPortConfigById(configs, portConfigId);
++    if (!cfg || cfg->ext.getTag() != AudioPortExt::Tag::mix) return 0;
++    return resolveLegacyHandleForPortConfig(configs, portConfigId);
++}
++
+ static audio_devices_t resolveOutputDevicesForPortConfig(
+         const std::vector<AudioPatch>& patches,
+         const std::vector<AudioPortConfig>& configs,
+@@ -285,6 +349,22 @@ void Module::initTopology() {
+     mTopologyPorts.push_back(wiredHpOutPort);
+     mTopologyPorts.push_back(wiredHsMicPort);
+ 
++    // Bluetooth SCO (template ports). The BT chip carries SCO over its PCM/I2S
++    // link to the codec (SCO_USE_I2S_INTERFACE), so the legacy HAL plays and
++    // records it through the primary mix ports with the bt-sco mixer paths.
++    AudioPort btScoOutPort    = makeDevPort("BT SCO",             AudioDeviceType::OUT_DEVICE,
++                                            false, false, AudioDeviceDescription::CONNECTION_BT_SCO);
++    AudioPort btScoHsOutPort  = makeDevPort("BT SCO Headset",     AudioDeviceType::OUT_HEADSET,
++                                            false, false, AudioDeviceDescription::CONNECTION_BT_SCO);
++    AudioPort btScoCarOutPort = makeDevPort("BT SCO Car Kit",     AudioDeviceType::OUT_CARKIT,
++                                            false, false, AudioDeviceDescription::CONNECTION_BT_SCO);
++    AudioPort btScoHsMicPort  = makeDevPort("BT SCO Headset Mic", AudioDeviceType::IN_HEADSET,
++                                            true,  false, AudioDeviceDescription::CONNECTION_BT_SCO);
++    mTopologyPorts.push_back(btScoOutPort);
++    mTopologyPorts.push_back(btScoHsOutPort);
++    mTopologyPorts.push_back(btScoCarOutPort);
++    mTopologyPorts.push_back(btScoHsMicPort);
++
+     // -----------------------------------------------------------------------
+     // Mix ports
+     // -----------------------------------------------------------------------
+@@ -323,7 +403,8 @@ void Module::initTopology() {
+ 
+     // Output: primary out mix → each sink device
+     for (int32_t sinkId : {speakerPort.id, earpiecePort.id,
+-                            wiredHsOutPort.id, wiredHpOutPort.id}) {
++                            wiredHsOutPort.id, wiredHpOutPort.id,
++                            btScoOutPort.id, btScoHsOutPort.id, btScoCarOutPort.id}) {
+         AudioRoute r;
+         r.sourcePortIds = {primaryOutMix.id};
+         r.sinkPortId    = sinkId;
+@@ -334,7 +415,8 @@ void Module::initTopology() {
+     // Input: each source device → primary input mix
+     {
+         AudioRoute r;
+-        r.sourcePortIds = {builtinMicPort.id, backMicPort.id, wiredHsMicPort.id};
++        r.sourcePortIds = {builtinMicPort.id, backMicPort.id, wiredHsMicPort.id,
++                           btScoHsMicPort.id};
+         r.sinkPortId    = primaryInMix.id;
+         r.isExclusive   = false;
+         mTopologyRoutes.push_back(r);
+@@ -379,7 +461,10 @@ ndk::ScopedAStatus Module::getTelephony(std::shared_ptr<ITelephony>* _aidl_retur
+ 
+ ndk::ScopedAStatus Module::getBluetooth(std::shared_ptr<IBluetooth>* _aidl_return) {
+     LOG(INFO) << __func__ << ": called";
+-    *_aidl_return = nullptr;
++    if (!mBluetooth) {
++        mBluetooth = ndk::SharedRefBase::make<LegacyBluetooth>(mLegacyDevice);
++    }
++    *_aidl_return = mBluetooth;
+     return ndk::ScopedAStatus::ok();
+ }
+ 
+@@ -394,13 +479,57 @@ ndk::ScopedAStatus Module::getBluetoothLe(std::shared_ptr<IBluetoothLe>* _aidl_r
+ }
+ 
+ ndk::ScopedAStatus Module::connectExternalDevice(const AudioPort& in_templateIdAndAdditionalData, AudioPort* _aidl_return) {
+-    LOG(INFO) << __func__ << ": called";
+-    // Legacy HAL might not need explicit connection for basic output/input if handled via set_parameters
+-    *_aidl_return = in_templateIdAndAdditionalData;
++    const int32_t templateId = in_templateIdAndAdditionalData.id;
++    const auto* templatePort = findPortById(mTopologyPorts, templateId);
++    if (!templatePort || templatePort->ext.getTag() != AudioPortExt::Tag::device ||
++        templatePort->ext.get<AudioPortExt::Tag::device>().device.type.connection.empty()) {
++        LOG(ERROR) << __func__ << ": port id " << templateId << " is not an external device template";
++        return ndk::ScopedAStatus::fromExceptionCode(EX_ILLEGAL_ARGUMENT);
++    }
++    // The legacy HAL needs no explicit connection; the connected device gets its
++    // own port id and the template's routes, as audioserver requires.
++    AudioPort connected = in_templateIdAndAdditionalData;
++    connected.id = mNextConnectedPortId++;
++    connected.flags = templatePort->flags;
++    if (connected.profiles.empty()) connected.profiles = templatePort->profiles;
++    std::vector<AudioRoute> newRoutes;
++    for (auto& route : mTopologyRoutes) {
++        if (route.sinkPortId == templateId) {
++            AudioRoute r = route;
++            r.sinkPortId = connected.id;
++            newRoutes.push_back(r);
++        } else if (containsConfigId(route.sourcePortIds, templateId)) {
++            route.sourcePortIds.push_back(connected.id);
++        }
++    }
++    mTopologyRoutes.insert(mTopologyRoutes.end(), newRoutes.begin(), newRoutes.end());
++    mTopologyPorts.push_back(connected);
++    LOG(INFO) << __func__ << ": template " << templateId << " -> port " << connected.id
++              << " (" << connected.name << ")";
++    *_aidl_return = connected;
+     return ndk::ScopedAStatus::ok();
+ }
+ 
+ ndk::ScopedAStatus Module::disconnectExternalDevice(int32_t in_portId) {
++    auto portIt = std::find_if(mTopologyPorts.begin(), mTopologyPorts.end(),
++                               [&](const auto& port) { return port.id == in_portId; });
++    if (portIt == mTopologyPorts.end() || in_portId < 1000) {
++        LOG(ERROR) << __func__ << ": port id " << in_portId << " is not a connected device";
++        return ndk::ScopedAStatus::fromExceptionCode(EX_ILLEGAL_ARGUMENT);
++    }
++    mTopologyPorts.erase(portIt);
++    mTopologyRoutes.erase(std::remove_if(mTopologyRoutes.begin(), mTopologyRoutes.end(),
++                                         [&](const auto& r) { return r.sinkPortId == in_portId; }),
++                          mTopologyRoutes.end());
++    for (auto& route : mTopologyRoutes) {
++        auto& src = route.sourcePortIds;
++        src.erase(std::remove(src.begin(), src.end(), in_portId), src.end());
++    }
++    mTopologyPortConfigs.erase(
++            std::remove_if(mTopologyPortConfigs.begin(), mTopologyPortConfigs.end(),
++                           [&](const auto& cfg) { return cfg.portId == in_portId; }),
++            mTopologyPortConfigs.end());
++    LOG(INFO) << __func__ << ": removed port " << in_portId;
+     return ndk::ScopedAStatus::ok();
+ }
+ 
+@@ -526,6 +655,10 @@ ndk::ScopedAStatus Module::openInputStream(
+     }
+ 
+     auto streamIn = ndk::SharedRefBase::make<StreamIn>(mLegacyDevice, legacyStream);
++    {
++        std::lock_guard<std::mutex> lock(mStreamsLock);
++        mInStreams[handle] = streamIn;
++    }
+     _aidl_return->stream = streamIn;
+ 
+     ndk::ScopedAStatus status = streamIn->init(&_aidl_return->desc);
+@@ -608,6 +741,10 @@ ndk::ScopedAStatus Module::openOutputStream(
+     }
+     
+     auto streamOut = ndk::SharedRefBase::make<StreamOut>(mLegacyDevice, legacyStream);
++    {
++        std::lock_guard<std::mutex> lock(mStreamsLock);
++        mOutStreams[handle] = streamOut;
++    }
+     _aidl_return->stream = streamOut;
+ 
+     ndk::ScopedAStatus status = streamOut->init(&_aidl_return->desc);
+@@ -646,6 +783,23 @@ ndk::ScopedAStatus Module::setAudioPatch(const AudioPatch& in_requested, AudioPa
+         mLegacyDevice->set_parameters(mLegacyDevice, cmd);
+     }
+ 
++    // The legacy HAL only re-routes through each stream's set_parameters
++    // (adev_set_parameters ignores "routing"), so pass the patch's devices to
++    // the stream open on its mix port: playback mix -> devices, devices -> capture mix.
++    if (legacyDevice != AUDIO_DEVICE_NONE) {
++        std::lock_guard<std::mutex> lock(mStreamsLock);
++        for (int32_t id : in_requested.sourcePortConfigIds) {
++            auto it = mOutStreams.find(mixHandleForPortConfig(mTopologyPortConfigs, id));
++            if (it == mOutStreams.end()) continue;
++            if (auto stream = it->second.lock()) stream->setRouting(legacyDevice);
++        }
++        for (int32_t id : in_requested.sinkPortConfigIds) {
++            auto it = mInStreams.find(mixHandleForPortConfig(mTopologyPortConfigs, id));
++            if (it == mInStreams.end()) continue;
++            if (auto stream = it->second.lock()) stream->setRouting(legacyDevice);
++        }
++    }
++
+     AudioPatch appliedPatch = in_requested;
+ 
+     // Calculate minimumStreamBufferSizeFrames from mix port configs
+diff --git a/hardware/audio/aidl/Module.h b/hardware/audio/aidl/Module.h
+index 9a96b83..0a9407e 100644
+--- a/hardware/audio/aidl/Module.h
++++ b/hardware/audio/aidl/Module.h
+@@ -19,8 +19,15 @@
+ #include <aidl/android/hardware/audio/core/BnModule.h>
+ #include <hardware/audio.h>
+ 
++#include <map>
++#include <memory>
++#include <mutex>
++
+ namespace aidl::android::hardware::audio::core {
+ 
++class StreamIn;
++class StreamOut;
++
+ class Module : public BnModule {
+   public:
+     Module();
+@@ -128,8 +135,17 @@ class Module : public BnModule {
+     std::vector<::aidl::android::hardware::audio::core::AudioPatch> mAudioPatches;
+     int32_t mNextPortConfigId = 100;
+     int32_t mNextPatchId = 1;
++    int32_t mNextConnectedPortId = 1000;  // ids for connected external devices
+     bool mTopologyInitialized = false;
+ 
++    // Bluetooth SCO settings (wideband, NREC) for the legacy HAL
++    std::shared_ptr<IBluetooth> mBluetooth;
++
++    // Open streams by legacy I/O handle, so patches can re-route them
++    std::mutex mStreamsLock;
++    std::map<int32_t, std::weak_ptr<StreamOut>> mOutStreams;
++    std::map<int32_t, std::weak_ptr<StreamIn>> mInStreams;
++
+     void initTopology();
+ };
+ 
+diff --git a/hardware/audio/aidl/StreamIn.cpp b/hardware/audio/aidl/StreamIn.cpp
+index 9606a23..f2102a0 100644
+--- a/hardware/audio/aidl/StreamIn.cpp
++++ b/hardware/audio/aidl/StreamIn.cpp
+@@ -17,6 +17,7 @@
+ #define LOG_TAG "audio_hw_aidl_stream_in"
+ 
+ #include <android-base/logging.h>
++#include <cstdio>
+ #include <time.h>
+ #include <algorithm>
+ 
+@@ -248,6 +249,7 @@ ndk::ScopedAStatus StreamIn::close() {
+         return ndk::ScopedAStatus::ok();
+     }
+     prepareToClose();
++    std::lock_guard<std::mutex> lock(mLegacyLock);
+     if (mLegacyDevice && mLegacyStream) {
+         LOG(INFO) << "StreamIn::close: closing legacy input stream";
+         mLegacyDevice->close_input_stream(mLegacyDevice, mLegacyStream);
+@@ -256,6 +258,15 @@ ndk::ScopedAStatus StreamIn::close() {
+     return ndk::ScopedAStatus::ok();
+ }
+ 
++void StreamIn::setRouting(audio_devices_t devices) {
++    std::lock_guard<std::mutex> lock(mLegacyLock);
++    if (mClosed || !mLegacyStream) return;
++    char cmd[32];
++    snprintf(cmd, sizeof(cmd), "routing=%u", static_cast<uint32_t>(devices));
++    LOG(INFO) << "StreamIn::setRouting: " << cmd;
++    mLegacyStream->common.set_parameters(&mLegacyStream->common, cmd);
++}
++
+ ndk::ScopedAStatus StreamIn::getStreamCommon(std::shared_ptr<IStreamCommon>* _aidl_return) {
+     *_aidl_return = mStreamCommon;
+     return ndk::ScopedAStatus::ok();
+diff --git a/hardware/audio/aidl/StreamIn.h b/hardware/audio/aidl/StreamIn.h
+index d10cf61..a2bfed9 100644
+--- a/hardware/audio/aidl/StreamIn.h
++++ b/hardware/audio/aidl/StreamIn.h
+@@ -23,6 +23,7 @@
+ #include <aidl/android/hardware/audio/core/StreamDescriptor.h>
+ #include <thread>
+ #include <atomic>
++#include <mutex>
+ 
+ #include "StreamCommon.h"
+ 
+@@ -79,12 +80,16 @@ class StreamIn : public BnStreamIn {
+     std::thread mWorker;
+     std::atomic<bool> mStopWorker{false};
+     std::atomic<bool> mClosed{false};
++    std::mutex mLegacyLock;  // guards mLegacyStream between close and setRouting
+ 
+     void workerThread();
+ 
+ public:
+     ndk::ScopedAStatus prepareToClose();
+     ndk::ScopedAStatus close();
++
++    // Forward a patch's devices to the legacy stream ("routing=")
++    void setRouting(audio_devices_t devices);
+     ndk::ScopedAStatus init(StreamDescriptor* desc);
+ };
+ 
+diff --git a/hardware/audio/aidl/StreamOut.cpp b/hardware/audio/aidl/StreamOut.cpp
+index 58025db..058968e 100644
+--- a/hardware/audio/aidl/StreamOut.cpp
++++ b/hardware/audio/aidl/StreamOut.cpp
+@@ -17,6 +17,7 @@
+ #define LOG_TAG "audio_hw_aidl_stream_out"
+ 
+ #include <android-base/logging.h>
++#include <cstdio>
+ #include <time.h>
+ #include <algorithm>
+ 
+@@ -318,6 +319,7 @@ ndk::ScopedAStatus StreamOut::close() {
+         return ndk::ScopedAStatus::ok();
+     }
+     prepareToClose();
++    std::lock_guard<std::mutex> lock(mLegacyLock);
+     if (mLegacyDevice && mLegacyStream) {
+         LOG(INFO) << "StreamOut::close: closing legacy output stream";
+         mLegacyDevice->close_output_stream(mLegacyDevice, mLegacyStream);
+@@ -326,6 +328,15 @@ ndk::ScopedAStatus StreamOut::close() {
+     return ndk::ScopedAStatus::ok();
+ }
+ 
++void StreamOut::setRouting(audio_devices_t devices) {
++    std::lock_guard<std::mutex> lock(mLegacyLock);
++    if (mClosed || !mLegacyStream) return;
++    char cmd[32];
++    snprintf(cmd, sizeof(cmd), "routing=%u", static_cast<uint32_t>(devices));
++    LOG(INFO) << "StreamOut::setRouting: " << cmd;
++    mLegacyStream->common.set_parameters(&mLegacyStream->common, cmd);
++}
++
+ ndk::ScopedAStatus StreamOut::getStreamCommon(std::shared_ptr<IStreamCommon>* _aidl_return) {
+     *_aidl_return = mStreamCommon;
+     return ndk::ScopedAStatus::ok();
+diff --git a/hardware/audio/aidl/StreamOut.h b/hardware/audio/aidl/StreamOut.h
+index 3cdafab..2101512 100644
+--- a/hardware/audio/aidl/StreamOut.h
++++ b/hardware/audio/aidl/StreamOut.h
+@@ -23,6 +23,7 @@
+ #include <aidl/android/hardware/audio/core/StreamDescriptor.h>
+ #include <thread>
+ #include <atomic>
++#include <mutex>
+ 
+ #include "StreamCommon.h"
+ 
+@@ -115,12 +116,16 @@ class StreamOut : public BnStreamOut {
+     std::thread mWorker;
+     std::atomic<bool> mStopWorker{false};
+     std::atomic<bool> mClosed{false};
++    std::mutex mLegacyLock;  // guards mLegacyStream between close and setRouting
+ 
+     void workerThread();
+ public:
+     // Helper to setup FMQs and return descriptor
+     ndk::ScopedAStatus prepareToClose();
+     ndk::ScopedAStatus close();
++
++    // Forward a patch's devices to the legacy stream ("routing=")
++    void setRouting(audio_devices_t devices);
+     
+     // Method to initialize FMQs called by Module
+     ndk::ScopedAStatus init(StreamDescriptor* desc);
+diff --git a/sepolicy/hal_audio_7580.te b/sepolicy/hal_audio_7580.te
+index 7d04fc6..35e82b5 100644
+--- a/sepolicy/hal_audio_7580.te
++++ b/sepolicy/hal_audio_7580.te
+@@ -26,5 +26,9 @@ allow hal_audio_default audio_device:dir r_dir_perms;
+ # Allow the service to set process priority / scheduling.
+ allow hal_audio_default self:global_capability_class_set sys_nice;
+ 
++# The primary, Bluetooth and effect audio HALs all run as hal_audio_default
++# and call each other over binder while routing calls (Bluetooth SCO).
++binder_call(hal_audio_default, hal_audio_default)
++
+ # Allow reading default properties (required by some libraries)
+ get_prop(hal_audio_default, default_prop)

@@ -1,0 +1,179 @@
+diff --git a/configs/audio/audio_policy_configuration.xml b/configs/audio/audio_policy_configuration.xml
+index f2f6517..3968ee3 100644
+--- a/configs/audio/audio_policy_configuration.xml
++++ b/configs/audio/audio_policy_configuration.xml
+@@ -107,8 +107,8 @@
+             </routes>
+         </module>
+ 
+-        <!-- A2dp Audio HAL -->
+-        <xi:include href="a2dp_audio_policy_configuration.xml"/>
++        <!-- Bluetooth Audio HAL (AIDL IModule/bluetooth) -->
++        <xi:include href="bluetooth_audio_policy_configuration_7_0.xml"/>
+ 
+         <!-- Usb Audio HAL -->
+         <xi:include href="usb_audio_policy_configuration.xml"/>
+diff --git a/device-common.mk b/device-common.mk
+index 092e5c3..200ec7a 100644
+--- a/device-common.mk
++++ b/device-common.mk
+@@ -41,7 +41,7 @@ PRODUCT_PACKAGES += \
+ 
+ PRODUCT_COPY_FILES += \
+     frameworks/av/services/audiopolicy/config/audio_policy_volumes.xml:$(TARGET_COPY_OUT_VENDOR)/etc/audio_policy_volumes.xml \
+-    frameworks/av/services/audiopolicy/config/a2dp_audio_policy_configuration.xml:$(TARGET_COPY_OUT_VENDOR)/etc/a2dp_audio_policy_configuration.xml \
++    frameworks/av/services/audiopolicy/config/bluetooth_audio_policy_configuration_7_0.xml:$(TARGET_COPY_OUT_VENDOR)/etc/bluetooth_audio_policy_configuration_7_0.xml \
+     frameworks/av/services/audiopolicy/config/default_volume_tables.xml:$(TARGET_COPY_OUT_VENDOR)/etc/default_volume_tables.xml \
+     frameworks/av/services/audiopolicy/config/r_submix_audio_policy_configuration.xml:$(TARGET_COPY_OUT_VENDOR)/etc/r_submix_audio_policy_configuration.xml \
+     frameworks/av/services/audiopolicy/config/usb_audio_policy_configuration.xml:$(TARGET_COPY_OUT_VENDOR)/etc/usb_audio_policy_configuration.xml \
+@@ -55,6 +55,11 @@ PRODUCT_COPY_FILES += \
+ PRODUCT_PACKAGES += \
+     android.hardware.bluetooth@1.0-impl.7580
+ 
++# Bluetooth audio: AIDL IModule/bluetooth + Bluetooth audio provider
++PRODUCT_PACKAGES += \
++    android.hardware.audio.service.bluetooth.universal7580 \
++    android.hardware.bluetooth.audio-impl
++
+ # Bluetooth profiles. Android 13+ enables each profile service only when its
+ # bluetooth.profile.*.enabled property is true; with none set, only GATT and
+ # hearing aid ran, so devices paired but never connected.
+diff --git a/hardware/audio/aidl-bluetooth/Android.bp b/hardware/audio/aidl-bluetooth/Android.bp
+new file mode 100644
+index 0000000..35f97b9
+--- /dev/null
++++ b/hardware/audio/aidl-bluetooth/Android.bp
+@@ -0,0 +1,35 @@
++package {
++    default_applicable_licenses: ["Android-Apache-2.0"],
++}
++
++cc_binary {
++    name: "android.hardware.audio.service.bluetooth.universal7580",
++    relative_install_path: "hw",
++    init_rc: ["android.hardware.audio.service.bluetooth.universal7580.rc"],
++    vintf_fragments: ["android.hardware.audio.service.bluetooth.universal7580.xml"],
++    defaults: [
++        "aidlaudioservice_defaults",
++        "latest_android_hardware_audio_core_sounddose_ndk_shared",
++        "latest_android_hardware_audio_core_ndk_shared",
++        "latest_android_hardware_bluetooth_audio_ndk_shared",
++        "latest_android_media_audio_common_types_ndk_shared",
++    ],
++    static_libs: [
++        "libaudioserviceexampleimpl",
++    ],
++    shared_libs: [
++        "android.hardware.bluetooth.audio-impl",
++        "libaudio_aidl_conversion_common_ndk",
++        "libbluetooth_audio_session_aidl",
++        "liblog",
++        "libmedia_helper",
++        "libstagefright_foundation",
++    ],
++    srcs: ["service.cpp"],
++    cflags: [
++        "-Wall",
++        "-Wextra",
++        "-Werror",
++        "-DBACKEND_NDK",
++    ],
++}
+diff --git a/hardware/audio/aidl-bluetooth/android.hardware.audio.service.bluetooth.universal7580.rc b/hardware/audio/aidl-bluetooth/android.hardware.audio.service.bluetooth.universal7580.rc
+new file mode 100644
+index 0000000..93fb69a
+--- /dev/null
++++ b/hardware/audio/aidl-bluetooth/android.hardware.audio.service.bluetooth.universal7580.rc
+@@ -0,0 +1,14 @@
++service vendor.audio-hal-bluetooth /vendor/bin/hw/android.hardware.audio.service.bluetooth.universal7580
++    class hal
++    interface aidl android.hardware.audio.core.IModule/bluetooth
++    interface aidl android.hardware.bluetooth.audio.IBluetoothAudioProviderFactory/default
++    user audioserver
++    group audio media net_bt net_bt_admin wakelock
++    capabilities BLOCK_SUSPEND SYS_NICE
++    onrestart restart audioserver
++
++# audioserver.rc restarts the stock audio HAL services when audioserver dies, but
++# not this one; restart it too, or it keeps the old A2DP connection and audioserver
++# can't connect the device again ("already connected").
++on property:init.svc.audioserver=restarting
++    restart vendor.audio-hal-bluetooth
+diff --git a/hardware/audio/aidl-bluetooth/android.hardware.audio.service.bluetooth.universal7580.xml b/hardware/audio/aidl-bluetooth/android.hardware.audio.service.bluetooth.universal7580.xml
+new file mode 100644
+index 0000000..d72ad9e
+--- /dev/null
++++ b/hardware/audio/aidl-bluetooth/android.hardware.audio.service.bluetooth.universal7580.xml
+@@ -0,0 +1,10 @@
++<manifest version="1.0" type="device">
++    <hal format="aidl">
++        <name>android.hardware.audio.core</name>
++        <version>3</version>
++        <interface>
++            <name>IModule</name>
++            <instance>bluetooth</instance>
++        </interface>
++    </hal>
++</manifest>
+diff --git a/hardware/audio/aidl-bluetooth/service.cpp b/hardware/audio/aidl-bluetooth/service.cpp
+new file mode 100644
+index 0000000..d8619e5
+--- /dev/null
++++ b/hardware/audio/aidl-bluetooth/service.cpp
+@@ -0,0 +1,44 @@
++/*
++ * Bluetooth audio for the universal7580 AIDL audio HAL.
++ *
++ * The primary HAL (android.hardware.audio.service.universal7580) only registers
++ * IModule/default. This separate service registers AOSP's reference Bluetooth
++ * module as IModule/bluetooth (A2DP and hearing-aid output for audioserver). The
++ * module's constructor also starts AOSP's Bluetooth audio provider
++ * (IBluetoothAudioProviderFactory/default), which the Bluetooth stack uses for the
++ * software A2DP data path.
++ */
++
++#define LOG_TAG "audio_bt_aidl_service"
++
++#include <android-base/logging.h>
++#include <android/binder_manager.h>
++#include <android/binder_process.h>
++
++#include "core-impl/Configuration.h"
++#include "core-impl/Module.h"
++
++using aidl::android::hardware::audio::core::IModule;
++using aidl::android::hardware::audio::core::Module;
++using aidl::android::media::audio::common::AudioPort;
++
++int main() {
++    ABinderProcess_setThreadPoolMaxThreadCount(8);
++    ABinderProcess_startThreadPool();
++
++    // Module::createInstance(type) alone passes an empty configuration, which
++    // leaves the module with no ports; pass the reference Bluetooth ports.
++    auto module = Module::createInstance(
++            Module::Type::BLUETOOTH,
++            aidl::android::hardware::audio::core::internal::getConfiguration(
++                    Module::Type::BLUETOOTH));
++    CHECK(module != nullptr);
++    std::vector<AudioPort> ports;
++    std::static_pointer_cast<IModule>(module)->getAudioPorts(&ports);
++    const std::string instance = std::string() + Module::descriptor + "/bluetooth";
++    CHECK_EQ(AServiceManager_addService(module->asBinder().get(), instance.c_str()), STATUS_OK);
++    LOG(INFO) << "started " << instance << " with " << ports.size() << " ports";
++
++    ABinderProcess_joinThreadPool();
++    return EXIT_FAILURE;  // should not reach
++}
+diff --git a/sepolicy/file_contexts b/sepolicy/file_contexts
+index d9edf3d..dd33249 100644
+--- a/sepolicy/file_contexts
++++ b/sepolicy/file_contexts
+@@ -178,6 +178,7 @@
+ # Audio AIDL HAL — Exynos 7580
+ /(vendor|system/vendor)/bin/hw/android\.hardware\.audio\.service\.universal7580              u:object_r:hal_audio_default_exec:s0
+ /(vendor|system/vendor)/bin/hw/android\.hardware\.audio\.effect\.service\.universal7580    u:object_r:hal_audio_default_exec:s0
++/(vendor|system/vendor)/bin/hw/android\.hardware\.audio\.service\.bluetooth\.universal7580    u:object_r:hal_audio_default_exec:s0
+ 
+ 
+ /(vendor|system/vendor)/bin/gpsd u:object_r:gpsd_exec:s0
