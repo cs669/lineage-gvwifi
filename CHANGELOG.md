@@ -3,8 +3,8 @@
 Base: LineageOS 23.2 (Android 16, `lineage_gvwifi-bp4a-userdebug`) from the github.com/gvwifi
 trees, kernel 3.10.108 (Exynos 7580), for the Samsung Galaxy View **SM-T670**.
 Every source change is a patch in `patches/<project>/`, applied by `scripts/apply-patches.sh`
-at build time. Nothing is committed upstream. Current build: 2026-10-14-b (`lineage-23.2-20261014-UNOFFICIAL-b-gvwifi.zip`), ROM zip
-SHA-256 `070852e8…b39c`, recovery tar `eef58bf9…476c`.
+at build time. Nothing is committed upstream. Current build: 2026-10-15 (`lineage-23.2-20261015-UNOFFICIAL-gvwifi.zip`), ROM zip
+SHA-256 `caedee0c…bd19`, recovery tar `eef58bf9…476c`.
 
 ---
 
@@ -27,8 +27,8 @@ SHA-256 `070852e8…b39c`, recovery tar `eef58bf9…476c`.
 | 0013 USB FunctionFS: drop the kiocb reference in aio cancel | `ffs_aio_cancel()` calls `aio_put_req()` | On 3.10, `kiocb_cancel()` takes an extra reference before calling the cancel callback and expects the callback to drop it (as gadgetfs' `ep_aio_cancel()` does). The backported FunctionFS callback follows the 3.15+ convention and never did, so each read adbd had pending when it stopped leaked its kiocb, and with it the endpoint file. FunctionFS never reset and every new adbd failed with "failed to write USB descriptors: No such process": `adb root`, turning USB debugging off, or any USB mode switch left USB adb offline until a reboot. Verified: `adb root` over USB reconnects |
 | 0014 fs: clear and free per-inode fscrypt / fs-verity info | `inode_init_always()` sets `i_crypt_info` and `i_verity_info` to NULL; `ext4_clear_inode()` calls `fscrypt_put_encryption_info()` and `fsverity_cleanup_inode()`; `ext4_alloc_inode()` clears the legacy ext4 key | **Data integrity.** The fscrypt/fs-verity backport added both fields but never cleared or freed them, so an inode recycled from the slab kept the previous file's info. A stale `i_verity_info` (left by an evicted fs-verity APK) made reads of ordinary files fail verification with a silent EIO: after a few framework restarts `packages.xml`, `roles.xml` and `package-restrictions.xml` became unreadable and system_server crash-looped ("Failed to read roles.xml ... EIO"). A stale `i_crypt_info` means data written with another file's key, which reads back as garbage after a reboot (the likely cause of the 2026-09-24 `packages.xml` loss). Verified: 0 read errors over the whole of `/data/system`, `/data/misc(_de)`, `/data/app` after 8 framework restarts (several per scan before) |
 | 0015 ION: keep multi-heap allocations out of secure heaps (since build 20261014) | `__ion_alloc()` skips a secure heap (`secure` in the device tree, e.g. `video`) for an unprotected request that names more than one heap; new helper `ion_heap_is_secure()` | Android 16's Codec2 ION allocator asks for every heap (`~0`), so a software decoder's buffer (a 32 KB Vorbis block at boot, kept by a leaked reference) landed in the secure `video` heap. While any unprotected buffer sits there the heap can't switch to protected mode, so every protected allocation failed with EPERM and secure video decoding could not start. Requests that name only the secure heap (Exynos OMX) are unchanged. Verified: the heap stays empty after boot and enters protected mode on demand; Widevine L3 playback (720p, hardware decoder) still works |
-| 0016 serial: no magic SysRq from the UARTs (next build) | `SUPPORT_SYSRQ` no longer defined in `drivers/tty/serial/samsung.c` | **The warm-reboot hang.** On a warm reboot (TWRP → system, `adb reboot`, system → recovery) UART1 (`13810000.uart`) receives a break plus junk, which the serial core turned into SysRq commands; SysRq `f` (OOM kill) at ~2.8 s panicked with "Out of memory and no killable processes" and the tablet hung after the Galaxy View logo (cold boots were fine). Verified: 3/3 warm reboots boot in 41 s, no UART SysRq in the log. `/proc/sysrq-trigger` still works |
-| 0017 battery: smart fuel gauge releases its I2C lock (next build) | `smart_fg_read_block_data()` now unlocks `i2c_lock` | The lock was never released, so the first read of the gauge's firmware byte (the `present` property of `smart-fuelgauge`) blocked every later gauge access: the battery monitor hung and Android showed a frozen percentage, voltage and current until reboot. Verified: values update after reading that property |
+| 0016 serial: no magic SysRq from the UARTs (since build 20261015) | `SUPPORT_SYSRQ` no longer defined in `drivers/tty/serial/samsung.c` | **The warm-reboot hang.** On a warm reboot (TWRP → system, `adb reboot`, system → recovery) UART1 (`13810000.uart`) receives a break plus junk, which the serial core turned into SysRq commands; SysRq `f` (OOM kill) at ~2.8 s panicked with "Out of memory and no killable processes" and the tablet hung after the Galaxy View logo (cold boots were fine). Verified: 3/3 warm reboots boot in 41 s, no UART SysRq in the log. `/proc/sysrq-trigger` still works |
+| 0017 battery: smart fuel gauge releases its I2C lock (since build 20261015) | `smart_fg_read_block_data()` now unlocks `i2c_lock` | The lock was never released, so the first read of the gauge's firmware byte (the `present` property of `smart-fuelgauge`) blocked every later gauge access: the battery monitor hung and Android showed a frozen percentage, voltage and current until reboot. Verified: values update after reading that property |
 
 ## Device trees
 
@@ -132,7 +132,9 @@ allowlist stays so a data-installed copy keeps working. v1.2 has the new intro t
 - Apps compiled with `cmd package compile -m speed -f` (redo after each ROM install).
 
 ## Known issues and limits
-- Charging only from the 19 V DC barrel. Micro-USB is data only (hardware).
+- Charging only from the 19 V DC barrel. Micro-USB does not charge: the bq24773 charger can't step
+  5 V up to the 3-cell pack, Android shows *Discharging* on USB (measured about -23 mA with the
+  screen off) and the tablet shows no off-mode charging screen on USB.
 - Aurora Store's home page crashes (Aurora bug, duplicate list key). Open app pages with
   `am start -a VIEW -d market://details?id=<pkg> -p com.aurora.store`.
 - microG: use official microG 0.3.17 or newer (2026-09-29; includes Play Age Signals). Builds

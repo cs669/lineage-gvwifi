@@ -8,7 +8,7 @@ Unofficial LineageOS 23.2 for the Wi-Fi Galaxy View (Exynos 7580, Linux 3.10.108
 | Lunch | `lineage_gvwifi-bp4a-userdebug` |
 | Source | LineageOS 23.2 + [`local_manifests/gvwifi.xml`](local_manifests/gvwifi.xml) (pinned gvwifi trees) |
 | Changes | [`patches/<project path>/NNNN-*.patch`](patches), applied by [`scripts/apply-patches.sh`](scripts/apply-patches.sh) (idempotent; nothing is committed into the upstream repos) |
-| Latest build | `lineage-23.2-20261014-UNOFFICIAL-b-gvwifi.zip`, release-keys, security patch 2026-09-01 |
+| Latest build | `lineage-23.2-20261015-UNOFFICIAL-gvwifi.zip`, release-keys, security patch 2026-09-01 |
 
 ## Screenshots
 Build 20261005 on the SM-T670 (1920x1080, landscape).
@@ -50,7 +50,7 @@ without wiping data.
 - No accelerometer: the rotation tile toggles landscape/portrait (`frameworks/base` 0001).
 - Default keyboard: HeliBoard with the stock Galaxy View layout and colors (`tools/HeliBoard`);
   the AOSP keyboard stays installed as an alternative.
-- Charging only via the 19 V barrel adapter; micro-USB is data only.
+- Charging only via the 19 V barrel adapter; micro-USB doesn't charge (it shows Discharging).
 - The bootloader (S-Boot T670UEU2APJ1) loads the whole boot/recovery image at `0x40204800` and
   copies the ramdisk to `0x42000000`: images over ~31.4 MB don't boot.
 - Key combos: recovery = Power + Volume Up; download mode = Power + Volume Down + Home;

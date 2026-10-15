@@ -117,7 +117,8 @@ Installed without GApps; hardware not yet tested.
   ~40 W). Micro-USB is data; the bq24773 is a buck-only charger and cannot
   charge the 3-cell (~11.6 V) pack from 5 V. The battery driver detects the
   adapter via GPIO gpa0-7 (`cable-irq`), not the MUIC. On micro-USB the
-  battery shows *Discharging* — expected, not a bug.
+  battery shows *Discharging* — expected, not a bug. Measured 2026-10-14: about -23 mA with the
+  screen off on USB (33% → 32% in 25 min), `usb/online=0`, and no off-mode charging screen.
 - Micro-USB data works when plugged at boot (SM5504 MUIC → `USB DETECTED` →
   UDC enabled, high-speed). One hot-plug was classed as a dedicated charger;
   re-test after the hotplug fix.
