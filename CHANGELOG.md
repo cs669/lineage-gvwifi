@@ -4,7 +4,7 @@ Base: LineageOS 23.2 (Android 16, `lineage_gvwifi-bp4a-userdebug`) from the gith
 trees, kernel 3.10.108 (Exynos 7580), for the Samsung Galaxy View **SM-T670**.
 Every source change is a patch in `patches/<project>/`, applied by `scripts/apply-patches.sh`
 at build time. Nothing is committed upstream. Current build: 2026-10-15 (`lineage-23.2-20261015-UNOFFICIAL-gvwifi.zip`), ROM zip
-SHA-256 `caedee0c…bd19`, recovery tar `eef58bf9…476c`.
+SHA-256 `caedee0c…bd19`, recovery tar `974bcc53…8b39`.
 
 ---
 
