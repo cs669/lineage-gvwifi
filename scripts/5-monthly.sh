@@ -31,7 +31,8 @@ tr '\n' ' ' < local_manifests/gvwifi.xml | grep -oE 'name="gvwifi/[^"]+"[^/]*rev
 while read -r line; do
     name=$(echo "$line" | sed -E 's/name="([^"]+)".*/\1/')
     pin=$(echo "$line" | sed -E 's/.*revision="([0-9a-f]+)".*/\1/')
-    head=$(git ls-remote "https://github.com/$name" refs/heads/lineage-23.2 | cut -c1-40)
+    head=$(git ls-remote "https://github.com/$name" refs/heads/lineage-23.2 | cut -c1-40) || true
+    [ -n "$head" ] || { echo "note: could not reach $name"; continue; }
     [ "$head" = "$pin" ] || echo "note: $name has new commits (pinned ${pin:0:8}, head ${head:0:8})"
 done
 
