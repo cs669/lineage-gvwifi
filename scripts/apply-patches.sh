@@ -19,7 +19,8 @@ PRIVATE=${PRIVATE:-0}
 
 projects() {
     for d in "$PUBLIC" "$PRIVATE_DIR"; do
-        [ -d "$d" ] && (cd "$d" && find . -name '*.patch' -printf '%h\n' | sed 's#^\./##')
+        # if, not &&: a missing patches-private/ (git drops empty dirs) must not fail the pipeline
+        if [ -d "$d" ]; then (cd "$d" && find . -name '*.patch' -printf '%h\n' | sed 's#^\./##'); fi
     done | sort -u
 }
 
