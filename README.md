@@ -31,7 +31,8 @@ Build 20261005 on the SM-T670 (1920x1080, landscape).
 1. Windows: `scripts\0-setup-wsl.ps1` (WSL Ubuntu 24.04), then in WSL `scripts/1-host-setup.sh`
 2. `scripts/2-sync.sh`: syncs LineageOS 23.2 with the local manifest (~100 GB)
 3. `tools/HeliBoard/build.sh`: builds the Galaxy View keyboard APK (HeliBoard v4.1 + `tools/HeliBoard/patches`;
-   needs JDK 17 in `~/tools/jdk-17` and an Android SDK with NDK 28.0.13004108 in `~/android-sdk`)
+   needs JDK 17 in `~/tools/jdk-17` and an Android SDK with NDK 28.0.13004108 in `~/android-sdk`;
+   `tools/HeliBoard/setup-toolchain.sh` installs both once)
 4. `scripts/3-build.sh`: applies the patches, builds ROM zip + recovery (about 2-3 h from scratch, ~80 GB output)
    - `3-build.sh recovery` / `3-build.sh kernel` for partial builds
    - `KEEP_GOING=1`, `CCACHE=1`, `JOBS=N`
